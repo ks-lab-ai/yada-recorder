@@ -1,10 +1,10 @@
 // Yada Recorder (Mac) : un gros bouton Enregistrer / Terminer.
-// Capture le son du Mac (l'appel, via ScreenCaptureKit) et le micro, en stéréo :
+// Capture le son du Mac (l'appel, via Core Audio, sans accès à l'écran) et le micro, en stéréo :
 // canal gauche = moi (micro), canal droit = l'appel (son du Mac).
 // À la fin : fichier .m4a envoyé dans Supabase Storage + une ligne dans la table calls,
 // puis suppression de la copie locale. Si l'envoi échoue, le fichier attend et repart tout seul.
 import AVFoundation
-import ScreenCaptureKit
+import CoreAudio
 import Security
 import NaturalLanguage
 import Speech
@@ -113,90 +113,142 @@ final class StereoWriter {
     }
 }
 
-// MARK: - Capture ScreenCaptureKit (son du Mac + micro)
+// MARK: - Capture : son du Mac (Core Audio, « sons du système uniquement ») + micro (AVAudioEngine)
+// Aucune autorisation d'écran : seulement « Micro » et « Enregistrement des sons du système ».
 
-final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
-    private var stream: SCStream?
+final class AudioCapture {
     private let queue = DispatchQueue(label: "yadarec.audio")
     private var writer: StereoWriter?
-    private var converters: [Int: (AVAudioFormat, AVAudioConverter)] = [:]
     private let mono48k = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
+    private var convTap: (AVAudioFormat, AVAudioConverter)?
+    private var convMic: (AVAudioFormat, AVAudioConverter)?
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggID = AudioObjectID(kAudioObjectUnknown)
+    private var procID: AudioDeviceIOProcID?
+    private var tapFormat: AVAudioFormat?
+    private let engine = AVAudioEngine()
+    private(set) var callPeak: Float = 0
     var onLevel: ((Int, Float) -> Void)?
     var onError: ((String) -> Void)?
 
     func start(to url: URL) async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else { throw RecError("Aucun écran trouvé pour capter le son.") }
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        let cfg = SCStreamConfiguration()
-        cfg.capturesAudio = true
-        cfg.excludesCurrentProcessAudio = true
-        cfg.captureMicrophone = true
-        cfg.sampleRate = 48_000
-        cfg.channelCount = 2
-        cfg.width = 2
-        cfg.height = 2
-        cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         writer = try StereoWriter(url: url)
-        let s = SCStream(filter: filter, configuration: cfg, delegate: self)
-        try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try s.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
-        try await s.startCapture()
-        stream = s
+        try startSystemAudio()
+        try startMic()
+    }
+
+    // --- son du Mac
+    private func startSystemAudio() throws {
+        let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        desc.uuid = UUID()
+        desc.name = "Yada Recorder"
+        desc.isPrivate = true
+        desc.muteBehavior = .unmuted
+        var err = AudioHardwareCreateProcessTap(desc, &tapID)
+        guard err == noErr else { throw RecError("Impossible de capter le son du Mac (tap \(err)).") }
+
+        var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var asbd = AudioStreamBasicDescription()
+        var fmtAddr = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        err = AudioObjectGetPropertyData(tapID, &fmtAddr, 0, nil, &fmtSize, &asbd)
+        guard err == noErr, let fmt = AVAudioFormat(streamDescription: &asbd) else { throw RecError("Format du son du Mac illisible (\(err)).") }
+        tapFormat = fmt
+
+        let outputUID = try Self.defaultOutputUID()
+        let agg: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "Yada Recorder",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]],
+        ]
+        err = AudioHardwareCreateAggregateDevice(agg as CFDictionary, &aggID)
+        guard err == noErr else { throw RecError("Impossible de préparer la capture du son (\(err)).") }
+
+        err = AudioDeviceCreateIOProcIDWithBlock(&procID, aggID, queue) { [weak self] _, input, inputTime, _, _ in
+            guard let self, let fmt = self.tapFormat,
+                  let buf = AVAudioPCMBuffer(pcmFormat: fmt, bufferListNoCopy: input, deallocator: nil) else { return }
+            let pts = AVAudioTime.seconds(forHostTime: inputTime.pointee.mHostTime)
+            guard let samples = self.mono(buf, conv: &self.convTap) else { return }
+            self.writer?.append(channel: 1, samples: samples, pts: pts)
+            let level = Self.rms(samples)
+            self.callPeak = max(self.callPeak, level)
+            self.onLevel?(1, level)
+        }
+        guard err == noErr else { throw RecError("Impossible de lancer la capture du son (\(err)).") }
+        err = AudioDeviceStart(aggID, procID)
+        guard err == noErr else { throw RecError("Impossible de démarrer la capture du son (\(err)).") }
+    }
+
+    static func defaultOutputUID() throws -> String {
+        var dev = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &dev) == noErr else { throw RecError("Aucune sortie audio trouvée.") }
+        var uid: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        addr.mSelector = kAudioDevicePropertyDeviceUID
+        guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &uid) == noErr, let u = uid?.takeRetainedValue() else { throw RecError("Sortie audio illisible.") }
+        return u as String
+    }
+
+    // --- micro
+    private func startMic() throws {
+        let input = engine.inputNode
+        let fmt = input.outputFormat(forBus: 0)
+        guard fmt.sampleRate > 0 else { throw RecError("Aucun micro disponible.") }
+        input.installTap(onBus: 0, bufferSize: 4_096, format: fmt) { [weak self] buf, when in
+            guard let self, let samples = self.mono(buf, conv: &self.convMic) else { return }
+            let pts = AVAudioTime.seconds(forHostTime: when.hostTime)
+            self.queue.async { self.writer?.append(channel: 0, samples: samples, pts: pts) }
+            self.onLevel?(0, Self.rms(samples))
+        }
+        engine.prepare()
+        try engine.start()
     }
 
     func stop() async -> Double {
-        if let s = stream { try? await s.stopCapture() }
-        stream = nil
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        if aggID != kAudioObjectUnknown {
+            if let p = procID { AudioDeviceStop(aggID, p); AudioDeviceDestroyIOProcID(aggID, p) }
+            AudioHardwareDestroyAggregateDevice(aggID)
+        }
+        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
+        procID = nil
+        aggID = AudioObjectID(kAudioObjectUnknown)
+        tapID = AudioObjectID(kAudioObjectUnknown)
         return queue.sync {
             let d = writer?.finish() ?? 0
             writer = nil
-            converters = [:]
             return d
         }
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        onError?("La capture s’est arrêtée : \(error.localizedDescription)")
-    }
-
-    func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
-        let channel: Int
-        switch type {
-        case .microphone: channel = 0
-        case .audio: channel = 1
-        default: return
-        }
-        guard sb.isValid, let samples = monoSamples(sb, key: channel) else { return }
-        writer?.append(channel: channel, samples: samples, pts: CMSampleBufferGetPresentationTimeStamp(sb).seconds)
+    static func rms(_ s: [Float]) -> Float {
+        guard !s.isEmpty else { return 0 }
         var sum: Float = 0
-        for v in samples { sum += v * v }
-        onLevel?(channel, samples.isEmpty ? 0 : (sum / Float(samples.count)).squareRoot())
+        for v in s { sum += v * v }
+        return (sum / Float(s.count)).squareRoot()
     }
 
     /// Convertit n'importe quel format reçu en mono 48 kHz float.
-    private func monoSamples(_ sb: CMSampleBuffer, key: Int) -> [Float]? {
-        guard let fd = CMSampleBufferGetFormatDescription(sb),
-              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fd) else { return nil }
-        var asbd = asbdPtr.pointee
-        guard let fmt = AVAudioFormat(streamDescription: &asbd) else { return nil }
-        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sb))
-        guard frames > 0, let src = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames) else { return nil }
-        src.frameLength = frames
-        guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sb, at: 0, frameCount: Int32(frames), into: src.mutableAudioBufferList) == noErr else { return nil }
-
-        if converters[key] == nil || converters[key]!.0 != fmt {
+    private func mono(_ src: AVAudioPCMBuffer, conv: inout (AVAudioFormat, AVAudioConverter)?) -> [Float]? {
+        let fmt = src.format
+        if conv == nil || conv!.0 != fmt {
             guard let c = AVAudioConverter(from: fmt, to: mono48k) else { return nil }
             c.downmix = true
-            converters[key] = (fmt, c)
+            conv = (fmt, c)
         }
-        let conv = converters[key]!.1
-        let cap = AVAudioFrameCount(Double(frames) * 48_000 / fmt.sampleRate) + 64
-        guard let out = AVAudioPCMBuffer(pcmFormat: mono48k, frameCapacity: cap) else { return nil }
+        let c = conv!.1
+        let cap = AVAudioFrameCount(Double(src.frameLength) * 48_000 / fmt.sampleRate) + 64
+        guard src.frameLength > 0, let out = AVAudioPCMBuffer(pcmFormat: mono48k, frameCapacity: cap) else { return nil }
         var fed = false
         var err: NSError?
-        conv.convert(to: out, error: &err) { _, status in
+        c.convert(to: out, error: &err) { _, status in
             if fed { status.pointee = .noDataNow; return nil }
             fed = true
             status.pointee = .haveData
@@ -557,7 +609,6 @@ final class Recorder: ObservableObject {
     func firstRunSetup() async {
         _ = await AVCaptureDevice.requestAccess(for: .audio)
         _ = await Transcriber.authorized()
-        if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
         checkSetup()
         let missingDictation = issues.contains { $0.id == "dictation" }
         if missingDictation && !UserDefaults.standard.bool(forKey: "openedDictation") {
@@ -571,8 +622,8 @@ final class Recorder: ObservableObject {
         if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
             list.append(SetupIssue(id: "mic", text: "Autoriser le micro"))
         }
-        if !CGPreflightScreenCaptureAccess() {
-            list.append(SetupIssue(id: "screen", text: "Autoriser le son du Mac, puis Relancer"))
+        if UserDefaults.standard.bool(forKey: "callAudioSilent") {
+            list.append(SetupIssue(id: "screen", text: "Le son de l’appel n’a pas été capté : autorise Yada Recorder dans « Enregistrement des sons du système uniquement », puis Relancer"))
         }
         if SFSpeechRecognizer.authorizationStatus() != .authorized {
             list.append(SetupIssue(id: "speech", text: "Autoriser la reconnaissance vocale"))
@@ -618,7 +669,8 @@ final class Recorder: ObservableObject {
         do {
             try await cap.start(to: Uploader.audioURL(id))
         } catch {
-            phase = .failed("Impossible de capter le son du Mac. Autorise Yada Recorder dans Réglages Système > Confidentialité et sécurité > Enregistrement de l’écran et de l’audio système, puis relance l’app. (\(error.localizedDescription))")
+            phase = .failed("Impossible de capter le son : \(error.localizedDescription)")
+            _ = await cap.stop()
             return
         }
         capture = cap
@@ -639,6 +691,8 @@ final class Recorder: ObservableObject {
         phase = .finishing
         timer?.invalidate()
         let duration = await cap.stop()
+        UserDefaults.standard.set(duration > 8 && cap.callPeak < 0.0003, forKey: "callAudioSilent")
+        checkSetup()
         capture = nil
         rec.endedAt = Date()
         rec.duration = duration
@@ -875,6 +929,26 @@ struct ContentView: View {
 enum SelfTest {
     static func runIfAsked() {
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--selftest-capture"), i + 2 < args.count {
+            // --selftest-capture <secondes> <sortie.m4a> : enregistre puis écrit un résumé dans <sortie>.txt
+            let secs = Double(args[i + 1]) ?? 8, out = URL(fileURLWithPath: args[i + 2])
+            Task { @MainActor in
+                var lines: [String] = []
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+                let cap = AudioCapture()
+                var micPeak: Float = 0
+                cap.onLevel = { ch, v in if ch == 0 { micPeak = max(micPeak, v) } }
+                do {
+                    try await cap.start(to: out)
+                    try await Task.sleep(nanoseconds: UInt64(secs * 1e9))
+                    let d = await cap.stop()
+                    lines.append("durée=\(d) picAppel=\(cap.callPeak) picMicro=\(micPeak)")
+                } catch { lines.append("ERREUR: \(error.localizedDescription)") }
+                try? lines.joined(separator: "\n").write(to: out.appendingPathExtension("txt"), atomically: true, encoding: .utf8)
+                exit(0)
+            }
+            return
+        }
         if let i = args.firstIndex(of: "--selftest-probe"), i + 2 < args.count {
             let input = URL(fileURLWithPath: args[i + 1]), output = URL(fileURLWithPath: args[i + 2])
             Task { @MainActor in

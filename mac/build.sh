@@ -24,12 +24,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>Yada Recorder</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.1</string>
-  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>2.2</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Yada Recorder enregistre ta voix pendant tes appels.</string>
-  <key>NSAudioCaptureUsageDescription</key><string>Yada Recorder enregistre le son de tes appels.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Yada Recorder enregistre le son de tes appels (pas l’écran).</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Yada Recorder transcrit tes appels sur ton Mac, sans rien envoyer en ligne.</string>
 </dict></plist>
 EOF
