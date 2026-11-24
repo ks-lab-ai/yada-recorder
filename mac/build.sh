@@ -43,7 +43,7 @@ cat > "$APP/Contents/Resources/Config.plist" <<EOF
 </dict></plist>
 EOF
 
-# Icône : à partir de l'icône de l'extension (fond vert, combiné, point rouge)
+# Icône : mac/AppIcon.png (fond vert, combiné, point rouge)
 ICON=AppIcon.png
 SET=build/AppIcon.iconset
 rm -rf "$SET" && mkdir -p "$SET"

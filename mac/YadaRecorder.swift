@@ -221,6 +221,17 @@ struct PendingRecording: Codable {
 }
 
 enum Uploader {
+    /// Prénom de la session Mac (« Noé Campo » -> « Noé »), et sa version dossier (« noe »).
+    static var person: String {
+        let full = NSFullUserName().trimmingCharacters(in: .whitespaces)
+        return full.split(separator: " ").first.map(String.init) ?? NSUserName()
+    }
+    static var personFolder: String {
+        let plain = person.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
+        let slug = plain.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) && $0.isASCII }.map(String.init).joined()
+        return slug.isEmpty ? NSUserName().lowercased() : slug
+    }
+
     static var dir: URL {
         let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Yada Recorder/recordings", isDirectory: true)
@@ -250,7 +261,7 @@ enum Uploader {
         guard config.isReady else { throw RecError("Supabase n’est pas configuré.") }
         let cal = Calendar(identifier: .gregorian)
         let c = cal.dateComponents(in: TimeZone(identifier: "UTC")!, from: r.startedAt)
-        let path = String(format: "%04d/%02d/%@.m4a", c.year!, c.month!, r.id)
+        let path = String(format: "%@/%04d/%02d/%@.m4a", personFolder, c.year!, c.month!, r.id)
 
         var up = URLRequest(url: URL(string: "\(config.url)/storage/v1/object/\(config.bucket)/\(path)")!)
         up.httpMethod = "POST"
@@ -270,6 +281,7 @@ enum Uploader {
         let row: [String: Any] = [
             "id": r.id, "started_at": iso.string(from: r.startedAt), "ended_at": iso.string(from: r.endedAt),
             "duration": Int(r.duration.rounded()), "audio_path": path, "status": "uploaded", "direction": "unknown",
+            "recorded_by": person,
         ]
         var ins = URLRequest(url: URL(string: "\(config.url)/rest/v1/calls")!)
         ins.httpMethod = "POST"
