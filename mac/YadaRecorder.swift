@@ -272,6 +272,15 @@ struct PendingRecording: Codable {
     var startedAt: Date
     var endedAt: Date
     var duration: Double
+    var transcript: TranscriptResult? = nil
+}
+
+/// Transcript envoyé dans Supabase : texte lisible + répliques détaillées.
+struct TranscriptResult: Codable {
+    struct Turn: Codable { var speaker: String; var start: Double; var end: Double; var text: String }
+    var text: String
+    var language: String
+    var turns: [Turn]
 }
 
 enum Uploader {
@@ -350,11 +359,21 @@ enum Uploader {
         }
 
         let iso = ISO8601DateFormatter()
-        let row: [String: Any] = [
+        var row: [String: Any] = [
             "id": r.id, "started_at": iso.string(from: r.startedAt), "ended_at": iso.string(from: r.endedAt),
             "duration": Int(r.duration.rounded()), "audio_path": path, "status": "uploaded", "direction": "unknown",
             "recorded_by": person,
         ]
+        if let t = r.transcript, !t.text.isEmpty {
+            row["status"] = "transcribed"
+            row["transcript_text"] = t.text
+            row["language"] = t.language
+            row["provider"] = "apple"
+            row["transcript_json"] = [
+                "language": t.language, "provider": "apple",
+                "segments": t.turns.map { ["speaker": $0.speaker, "start": $0.start, "end": $0.end, "text": $0.text] },
+            ]
+        }
         var ins = URLRequest(url: URL(string: "\(config.url)/rest/v1/calls")!)
         ins.httpMethod = "POST"
         ins.setValue(config.key, forHTTPHeaderField: "apikey")
@@ -511,13 +530,13 @@ enum Transcriber {
     }
 
     @MainActor
-    static func transcribe(_ url: URL, language: CallLanguage, progress: @escaping (Double) -> Void) async throws -> String {
+    static func transcribe(_ url: URL, language: CallLanguage, progress: @escaping (Double) -> Void) async throws -> TranscriptResult {
         let ch = try await Task.detached { try loadChannels(url) }.value
         var plan: [(speaker: Int, range: Range<Int>)] = []
         for (i, c) in ch.prefix(2).enumerated() { for r in chunks(c) { plan.append((i, r)) } }
-        if plan.isEmpty { return "" }
-
         var locale = language.locales[0]
+        if plan.isEmpty { return TranscriptResult(text: "", language: String(locale.prefix(2)), turns: []) }
+
         if language == .auto {
             // Sur un extrait (l'interlocuteur en priorité) : anglais si le moteur anglais est sûr de lui,
             // sinon français si le texte reconnu en français est bien du français, sinon anglais.
@@ -540,11 +559,13 @@ enum Transcriber {
             }
             progress(Double(i + 1) / Double(plan.count))
         }
-        return format(words)
+        let turns = mergeTurns(words)
+        return TranscriptResult(text: format(turns), language: String(locale.prefix(2)), turns: turns.map {
+            TranscriptResult.Turn(speaker: $0.speaker == 0 ? "me" : "them", start: ($0.start * 100).rounded() / 100, end: ($0.end * 100).rounded() / 100, text: $0.text)
+        })
     }
 
-    /// Une ligne par prise de parole : "[00:12] Moi : …" / "[00:15] Interlocuteur : …"
-    static func format(_ words: [Word]) -> String {
+    static func mergeTurns(_ words: [Word]) -> [(speaker: Int, start: Double, end: Double, text: String)] {
         var turns: [(speaker: Int, start: Double, end: Double, text: String)] = []
         for w in words.sorted(by: { $0.t < $1.t }) {
             if var last = turns.last, last.speaker == w.speaker, w.t - last.end < 1.5 {
@@ -555,7 +576,12 @@ enum Transcriber {
                 turns.append((w.speaker, w.t, w.end, w.text))
             }
         }
-        return turns.map { t in
+        return turns
+    }
+
+    /// Une ligne par prise de parole : "[00:12] Moi : …" / "[00:15] Interlocuteur : …"
+    static func format(_ turns: [(speaker: Int, start: Double, end: Double, text: String)]) -> String {
+        turns.map { t in
             let s = Int(t.start)
             return String(format: "[%02d:%02d] %@ : %@", s / 60, s % 60, t.speaker == 0 ? "Moi" : "Interlocuteur", t.text)
         }.joined(separator: "\n")
@@ -735,11 +761,11 @@ final class Recorder: ObservableObject {
             return
         }
         refreshPending()
-        await transcribe(rec)
+        await transcribe(&rec)
         await send(rec)
     }
 
-    func transcribe(_ rec: PendingRecording) async {
+    func transcribe(_ rec: inout PendingRecording) async {
         guard await Transcriber.authorized() else {
             transcriptNote = "Transcription impossible : autorise la reconnaissance vocale."
             checkSetup()
@@ -747,11 +773,13 @@ final class Recorder: ObservableObject {
         }
         phase = .transcribing(0)
         do {
-            let text = try await Transcriber.transcribe(Uploader.audioURL(rec.id), language: language) { p in
+            let result = try await Transcriber.transcribe(Uploader.audioURL(rec.id), language: language) { p in
                 Task { @MainActor in if case .transcribing = self.phase { self.phase = .transcribing(p) } }
             }
-            transcript = text
-            transcriptNote = text.isEmpty ? "Aucune parole détectée." : ""
+            transcript = result.text
+            transcriptNote = result.text.isEmpty ? "Aucune parole détectée." : ""
+            rec.transcript = result
+            try? Uploader.save(rec)
         } catch {
             transcriptNote = "Transcription impossible : \(error.localizedDescription)"
             checkSetup()
@@ -1011,7 +1039,7 @@ enum SelfTest {
             Task { @MainActor in
                 var text: String
                 if await Transcriber.authorized() {
-                    do { text = try await Transcriber.transcribe(input, language: lang) { _ in } }
+                    do { text = try await Transcriber.transcribe(input, language: lang) { _ in }.text }
                     catch { text = "ERREUR: \(error.localizedDescription)" }
                 } else { text = "ERREUR: reconnaissance vocale non autorisée" }
                 try? text.write(to: output, atomically: true, encoding: .utf8)

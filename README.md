@@ -7,7 +7,7 @@ Petite app Mac avec un gros bouton **Enregistrer / Terminer** pour enregistrer s
 - Chaque enregistrement porte le prénom de la session Mac (`recorded_by`) et est rangé dans un dossier à ce nom : `louis/2026/11/<id>.m4a`.
 - Raccourci : ⌘R pour Enregistrer / Terminer. Fenêtre redimensionnable.
 - Sans connexion, le fichier attend sur le Mac et repart tout seul (essai toutes les minutes).
-- À la fin de l'appel, **transcript affiché dans l'app** avec un bouton **Copier** (Moi / Interlocuteur, horodaté). Transcription faite sur le Mac par la reconnaissance vocale d'Apple, hors ligne, sans compte. Langue : English par défaut, Français, ou Auto.
+- À la fin de l'appel, **transcript affiché dans l'app** avec un bouton **Copier** (Moi / Interlocuteur, horodaté). Transcription faite sur le Mac par la reconnaissance vocale d'Apple, hors ligne, sans compte, puis envoyée avec l'audio dans `calls` (`transcript_text`, `transcript_json` par réplique, `language`). Langue : English par défaut, Français, ou Auto.
 
 ## Installer
 
@@ -33,6 +33,7 @@ Appliquer dans l'éditeur SQL, dans l'ordre :
 1. [`001_init.sql`](supabase/migrations/001_init.sql) : table `calls`, bucket privé `call-recordings`, RLS.
 2. [`002_mac_recorder_upload.sql`](supabase/migrations/002_mac_recorder_upload.sql) : la clé publique peut seulement **déposer** un fichier audio et ajouter une ligne. Elle ne peut ni lire, ni modifier, ni supprimer.
 3. [`003_recorded_by.sql`](supabase/migrations/003_recorded_by.sql) : colonne `recorded_by` (qui a enregistré).
+4. [`004_transcripts.sql`](supabase/migrations/004_transcripts.sql) : la clé publique peut aussi déposer le transcript avec la ligne.
 
 Pour écouter : Dashboard Supabase > Storage > `call-recordings`. Pour la liste : Table Editor > `calls`.
 
