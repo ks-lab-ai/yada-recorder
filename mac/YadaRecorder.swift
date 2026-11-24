@@ -504,6 +504,15 @@ enum Setup {
     static func open(_ key: String) {
         if let u = URL(string: settings[key] ?? "") { NSWorkspace.shared.open(u) }
     }
+
+    /// L'autorisation « son du Mac » ne s'applique qu'après un redémarrage de l'app.
+    static func relaunch() {
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
 }
 
 struct SetupIssue: Identifiable {
@@ -563,7 +572,7 @@ final class Recorder: ObservableObject {
             list.append(SetupIssue(id: "mic", text: "Autoriser le micro"))
         }
         if !CGPreflightScreenCaptureAccess() {
-            list.append(SetupIssue(id: "screen", text: "Autoriser le son du Mac (puis relancer l’app)"))
+            list.append(SetupIssue(id: "screen", text: "Autoriser le son du Mac, puis Relancer"))
         }
         if SFSpeechRecognizer.authorizationStatus() != .authorized {
             list.append(SetupIssue(id: "speech", text: "Autoriser la reconnaissance vocale"))
@@ -782,6 +791,9 @@ struct ContentView: View {
                             Text("⚠︎ \(issue.text)").font(.system(size: 12))
                             Spacer()
                             Button("Ouvrir") { Setup.open(issue.id) }.controlSize(.small)
+                            if issue.id == "screen" {
+                                Button("Relancer") { Setup.relaunch() }.controlSize(.small)
+                            }
                         }
                     }
                 }
