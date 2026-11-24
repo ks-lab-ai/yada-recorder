@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Yada Recorder",
+  "version": "1.0.0",
+  "description": "Enregistre et transcrit automatiquement les appels passés sur yadaphone.com.",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://www.yadaphone.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": { "service_worker": "src/background.js" },
+  "action": { "default_popup": "src/popup.html", "default_title": "Yada Recorder" },
+  "icons": { "16": "assets/icon16.png", "48": "assets/icon48.png", "128": "assets/icon128.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.yadaphone.com/*"],
+      "js": ["src/inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://www.yadaphone.com/*"],
+      "js": ["src/bridge.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["assets/consent-en.wav"], "matches": ["https://www.yadaphone.com/*"] }
+  ]
+}

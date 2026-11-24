@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Yada Recorder</title>
+<style>
+  :root { color-scheme: light dark; --muted: #6b7280; --line: rgba(127,127,127,.25); }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 320px; font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 14px; font-weight: 650; flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; }
+  .dot.ok { background: #16a34a; } .dot.warn { background: #d97706; } .dot.rec { background: #dc2626; }
+  section { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  section:last-child { border-bottom: 0; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+  .muted { color: var(--muted); }
+  label { font-weight: 550; }
+  select, input[type=text], input[type=number] { font: inherit; padding: 5px 7px; border-radius: 6px; border: 1px solid var(--line); background: transparent; }
+  input[type=text] { width: 100%; }
+  button { font: inherit; font-weight: 550; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
+  button.primary { background: #111; color: #fff; border-color: #111; }
+  @media (prefers-color-scheme: dark) { button.primary { background: #fff; color: #111; border-color: #fff; } }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  details summary { cursor: pointer; color: var(--muted); }
+  #msg { min-height: 1em; margin-top: 6px; }
+  .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+  <header>
+    <span id="dot" class="dot"></span>
+    <h1>Yada Recorder</h1>
+    <span id="state" class="muted"></span>
+  </header>
+
+  <section>
+    <div class="row"><span>App desktop</span><span id="desktop" class="muted">…</span></div>
+    <div class="row"><span>En attente d’envoi</span><span id="pending" class="muted">…</span></div>
+    <div class="actions" style="margin-top:8px">
+      <button id="open" class="primary">Ouvrir les transcripts</button>
+      <button id="openTab">Dans un onglet</button>
+    </div>
+  </section>
+
+  <section>
+    <label for="consent">Message de consentement</label>
+    <div class="row" style="margin-top:6px">
+      <select id="consent" style="width:100%">
+        <option value="us">Numéros +1 uniquement (défaut)</option>
+        <option value="all">Tous les appels</option>
+        <option value="off">Désactivé</option>
+      </select>
+    </div>
+    <p class="hint">Joue « This call is recorded for quality and note-taking purposes. » dans la ligne dès que l’interlocuteur décroche.</p>
+  </section>
+
+  <section id="pairSection">
+    <div class="actions">
+      <button id="pair">Appairer avec l’app</button>
+    </div>
+    <div id="msg" class="muted"></div>
+    <details style="margin-top:8px">
+      <summary>Avancé</summary>
+      <div style="margin-top:8px">
+        <label for="token">Token (à coller depuis l’app si besoin)</label>
+        <input id="token" type="text" placeholder="colle le token ici" autocomplete="off">
+        <div class="row" style="margin-top:8px">
+          <label for="port">Port local</label>
+          <input id="port" type="number" min="1024" max="65535" style="width:90px">
+        </div>
+        <div class="row">
+          <label for="debug">Logs console (debug)</label>
+          <input id="debug" type="checkbox">
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button id="saveAdv">Enregistrer</button>
+        </div>
+      </div>
+    </details>
+  </section>
+<script src="popup.js"></script>
+</body>
+</html>

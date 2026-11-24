@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yada Recorder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo-dot"></span>Transcripts</div>
+    <input id="q" type="search" placeholder="Rechercher dans les appels, résumés, numéros…" autocomplete="off" spellcheck="false">
+    <nav>
+      <a href="#/" id="navList">Appels</a>
+      <a href="#/settings" id="navSettings">Réglages</a>
+    </nav>
+  </header>
+
+  <main id="viewList" class="split">
+    <aside class="list">
+      <div id="banner" class="banner" hidden></div>
+      <ul id="calls"></ul>
+      <p id="empty" class="muted center" hidden>Aucun appel pour l’instant. Passe un appel sur yadaphone.com : il apparaîtra ici.</p>
+    </aside>
+    <section id="detail" class="detail">
+      <p class="muted center pad">Sélectionne un appel.</p>
+    </section>
+  </main>
+
+  <main id="viewSettings" class="settings" hidden>
+    <form id="settingsForm" autocomplete="off">
+      <h2>Supabase</h2>
+      <label>URL du projet <input name="supabaseUrl" type="url" placeholder="https://xxxx.supabase.co"></label>
+      <label>Clé secrète (service_role ou sb_secret_…) <input name="supabaseServiceKey" type="password" data-secret></label>
+
+      <h2>Transcription</h2>
+      <label>Provider
+        <select name="provider">
+          <option value="deepgram">Deepgram nova-3 (recommandé)</option>
+          <option value="elevenlabs">ElevenLabs Scribe</option>
+        </select>
+      </label>
+      <label>Langue
+        <select name="language">
+          <option value="multi">FR / EN mélangés (multilingue)</option>
+          <option value="auto">Détection automatique par canal</option>
+          <option value="fr">Français</option>
+          <option value="en">Anglais</option>
+        </select>
+      </label>
+      <label>Clé API Deepgram <input name="deepgramKey" type="password" data-secret></label>
+      <label>Clé API ElevenLabs <input name="elevenlabsKey" type="password" data-secret></label>
+      <details>
+        <summary>Modèles</summary>
+        <label>Modèle Deepgram <input name="deepgramModel" type="text"></label>
+        <label>Modèle ElevenLabs <input name="elevenlabsModel" type="text"></label>
+      </details>
+
+      <h2>Résumé (Claude)</h2>
+      <label>Clé API Anthropic <input name="anthropicKey" type="password" data-secret></label>
+      <label>Modèle <input name="claudeModel" type="text"></label>
+
+      <h2>Appels</h2>
+      <label>Message de consentement
+        <select name="consentMode">
+          <option value="us">Numéros +1 uniquement (défaut)</option>
+          <option value="all">Tous les appels</option>
+          <option value="off">Désactivé</option>
+        </select>
+      </label>
+      <label class="check"><input name="launchAtLogin" type="checkbox"> Lancer au démarrage du Mac</label>
+      <label class="check"><input name="notifications" type="checkbox"> Notification quand un transcript est prêt</label>
+
+      <div class="actions">
+        <button type="submit" class="primary">Enregistrer</button>
+        <button type="button" id="testBtn">Tester les connexions</button>
+        <span id="saveMsg" class="muted"></span>
+      </div>
+      <pre id="testOut" class="test" hidden></pre>
+
+      <h2>Extension Chrome</h2>
+      <p class="muted">L’appairage se fait depuis le popup de l’extension (bouton « Appairer »). Si besoin, colle ce token dans ses options avancées :</p>
+      <div class="token"><code id="token">…</code><button type="button" id="copyToken">Copier</button></div>
+      <p class="muted small">Les clés sont stockées dans le Trousseau macOS (service « Yada Recorder »), jamais en clair sur le disque. Laisse un champ vide pour garder la clé actuelle.</p>
+      <p class="muted small" id="version"></p>
+    </form>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

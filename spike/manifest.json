@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Yada Recorder SPIKE (logs WebRTC)",
+  "version": "0.0.5",
+  "description": "Spike : patche RTCPeerConnection sur yadaphone.com et logue les pistes audio dans la console.",
+  "host_permissions": [
+    "https://www.yadaphone.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.yadaphone.com/*"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Yada Recorder SPIKE",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

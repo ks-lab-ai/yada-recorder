@@ -1,0 +1,21 @@
+{
+  "name": "yada-recorder",
+  "productName": "Yada Recorder",
+  "version": "1.0.0",
+  "description": "Enregistrement et transcription automatique des appels Yadaphone (app menubar).",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron .",
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "@supabase/supabase-js": "^2"
+  },
+  "devDependencies": {
+    "@electron/packager": "latest",
+    "electron": "latest"
+  }
+}
