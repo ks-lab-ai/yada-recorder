@@ -1,5 +1,25 @@
 # Yada Recorder
 
+## Version simple : l'app Mac (recommandée)
+
+Un gros bouton **Enregistrer / Terminer**. L'app capte le son du Mac (l'appel) et ton micro, en stéréo (gauche = toi, droite = l'appel), puis à la fin envoie le fichier `.m4a` dans Supabase (bucket `call-recordings`, une ligne dans la table `calls`) et supprime la copie locale. Si l'envoi échoue, le fichier attend et repart tout seul. Marche avec Yadaphone, Meet, Zoom, n'importe quoi.
+
+```bash
+git clone https://github.com/ks-lab-ai/yada-recorder.git ~/Documents/yada-recorder
+cd ~/Documents/yada-recorder
+echo 'SUPABASE_URL=https://<ton-projet>.supabase.co' > mac/config.env
+echo 'SUPABASE_KEY=sb_publishable_...' >> mac/config.env
+./mac/build.sh && cp -R "mac/build/Yada Recorder.app" /Applications/
+```
+
+Prérequis : macOS 15+, outils de ligne de commande Xcode (`xcode-select --install`). Supabase : appliquer `supabase/migrations/001_init.sql` puis `002_mac_recorder_upload.sql` (la clé publique peut seulement déposer des fichiers et des lignes, jamais lire, modifier ni supprimer).
+
+Au premier clic, macOS demande deux autorisations : **Micro** et **Enregistrement de l'écran et de l'audio système**. Accepte les deux (puis relance l'app si macOS le demande).
+
+---
+
+## Version complète : extension Chrome + app Electron (enregistrement automatique, transcription, résumés)
+
 Chaque appel passé sur yadaphone.com est enregistré en stéréo (gauche = moi, droite = interlocuteur), envoyé dans Supabase, transcrit (Deepgram nova-3 par défaut), résumé par Claude, puis retrouvable depuis un bouton « Transcripts » dans la nav de Yadaphone. Rien à lancer à la main.
 
 ```
