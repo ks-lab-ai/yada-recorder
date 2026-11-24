@@ -307,6 +307,24 @@ enum Uploader {
     static func audioURL(_ id: String) -> URL { dir.appendingPathComponent("\(id).m4a") }
     static func metaURL(_ id: String) -> URL { dir.appendingPathComponent("\(id).json") }
 
+    /// Fichier audio sans fiche (app coupée en plein enregistrement) : on le récupère s'il est lisible,
+    /// sinon on le met à la Corbeille.
+    static func recoverOrphans(except current: String?) {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        for f in files where f.pathExtension == "m4a" {
+            let id = f.deletingPathExtension().lastPathComponent
+            if id == current || fm.fileExists(atPath: metaURL(id).path) { continue }
+            if let af = try? AVAudioFile(forReading: f), af.length > 0 {
+                let dur = Double(af.length) / af.processingFormat.sampleRate
+                let created = (try? f.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+                try? save(PendingRecording(id: id, startedAt: created, endedAt: created.addingTimeInterval(dur), duration: dur))
+            } else {
+                try? fm.trashItem(at: f, resultingItemURL: nil)
+            }
+        }
+    }
+
     static func save(_ r: PendingRecording) throws {
         try encoder.encode(r).write(to: metaURL(r.id), options: .atomic)
     }
@@ -596,6 +614,7 @@ final class Recorder: ObservableObject {
     private var retryTimer: Timer?
 
     init() {
+        Uploader.recoverOrphans(except: nil)
         refreshPending()
         retryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.uploadPending() }
@@ -684,6 +703,17 @@ final class Recorder: ObservableObject {
                 self.levels = self.levels.map { $0 * 0.85 }
             }
         }
+    }
+
+    /// Arrêt rapide (l'app se ferme) : fichier finalisé et mis en attente, envoi au prochain lancement.
+    func stopForQuit() async {
+        guard let cap = capture, var rec = current else { return }
+        timer?.invalidate()
+        rec.duration = await cap.stop()
+        rec.endedAt = Date()
+        capture = nil
+        current = nil
+        try? Uploader.save(rec)
     }
 
     func stop() async {
@@ -815,7 +845,8 @@ struct ContentView: View {
                 .frame(width: 190, height: 190)
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.space, modifiers: [])
+            .keyboardShortcut("r", modifiers: [.command])
+            .help("Enregistrer / Terminer (⌘R)")
             .disabled(rec.isBusy)
 
             if !rec.isRecording {
@@ -853,7 +884,7 @@ struct ContentView: View {
                 }
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.12)))
-                .frame(width: 400)
+                .frame(maxWidth: .infinity)
             }
 
             if !rec.transcript.isEmpty || !rec.transcriptNote.isEmpty {
@@ -882,11 +913,11 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                         }
-                        .frame(height: 240)
+                        .frame(minHeight: 140, maxHeight: .infinity)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.08)))
                     }
                 }
-                .frame(width: 420)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             if rec.pendingCount > 0 && !rec.isRecording {
@@ -905,9 +936,9 @@ struct ContentView: View {
             }
         }
         .padding(28)
-        .frame(width: 480)
-        .frame(minHeight: 420)
+        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in rec.checkSetup() }
+        .onAppear { AppDelegate.recorder = rec }
     }
 
     @ViewBuilder var status: some View {
@@ -1010,11 +1041,26 @@ enum SelfTest {
     }
 }
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static weak var recorder: Recorder?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let r = MainActor.assumeIsolated({ Self.recorder }), MainActor.assumeIsolated({ r.isRecording }) else { return .terminateNow }
+        Task { @MainActor in
+            await r.stopForQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct YadaRecorderApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     init() { SelfTest.runIfAsked() }
     var body: some Scene {
         WindowGroup("Yada Recorder") { ContentView() }
-            .windowResizability(.contentSize)
+            .windowResizability(.contentMinSize)
+            .defaultSize(width: 560, height: 680)
     }
 }

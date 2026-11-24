@@ -5,6 +5,7 @@ Petite app Mac avec un gros bouton **Enregistrer / Terminer** pour enregistrer s
 - Capte le son du Mac (l'appel) et le micro, en stéréo : gauche = toi, droite = l'interlocuteur. Aucun accès à l'écran.
 - À la fin : envoie le fichier `.m4a` dans Supabase (bucket privé `call-recordings`), ajoute une ligne dans la table `calls`, puis supprime la copie locale.
 - Chaque enregistrement porte le prénom de la session Mac (`recorded_by`) et est rangé dans un dossier à ce nom : `louis/2026/11/<id>.m4a`.
+- Raccourci : ⌘R pour Enregistrer / Terminer. Fenêtre redimensionnable.
 - Sans connexion, le fichier attend sur le Mac et repart tout seul (essai toutes les minutes).
 - À la fin de l'appel, **transcript affiché dans l'app** avec un bouton **Copier** (Moi / Interlocuteur, horodaté). Transcription faite sur le Mac par la reconnaissance vocale d'Apple, hors ligne, sans compte. Langue : English par défaut, Français, ou Auto.
 
