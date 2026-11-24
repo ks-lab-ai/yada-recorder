@@ -6,6 +6,7 @@ Petite app Mac avec un gros bouton **Enregistrer / Terminer** pour enregistrer s
 - À la fin : envoie le fichier `.m4a` dans Supabase (bucket privé `call-recordings`), ajoute une ligne dans la table `calls`, puis supprime la copie locale.
 - Chaque enregistrement porte le prénom de la session Mac (`recorded_by`) et est rangé dans un dossier à ce nom : `louis/2026/11/<id>.m4a`.
 - Sans connexion, le fichier attend sur le Mac et repart tout seul (essai toutes les minutes).
+- À la fin de l'appel, **transcript affiché dans l'app** avec un bouton **Copier** (Moi / Interlocuteur, horodaté). Transcription faite sur le Mac par la reconnaissance vocale d'Apple, hors ligne, sans compte. Langue : English par défaut, Français, ou Auto.
 
 ## Installer
 
@@ -20,7 +21,7 @@ echo 'SUPABASE_KEY=<clé publique sb_publishable_…>' >> mac/config.env
 open "/Applications/Yada Recorder.app"
 ```
 
-Au premier clic, macOS demande deux autorisations : **Micro** et **Enregistrement de l'écran et de l'audio système**. Accepte les deux, puis relance l'app si macOS le demande.
+Au premier lancement, l'app demande d'un coup les trois autorisations : **Micro**, **Enregistrement de l'écran et de l'audio système**, **Reconnaissance vocale**. Si la dictée hors ligne en français ou en anglais n'est pas installée, elle ouvre directement Réglages Système > Clavier > Dictée. Tant que quelque chose manque, un encadré « À régler une fois » l'indique avec un bouton Ouvrir.
 
 Sans `mac/config.env`, l'app demande l'URL et la clé au premier lancement (gardées dans le Trousseau).
 
@@ -41,3 +42,9 @@ Pour écouter : Dashboard Supabase > Storage > `call-recordings`. Pour la liste 
 ```
 
 Écrit 3 s de stéréo synthétique (300 Hz à gauche, 1200 Hz à droite) par le même code que l'enregistrement réel, sans micro ni autorisation.
+
+```bash
+open -n -a "/Applications/Yada Recorder.app" --args --selftest-transcribe appel.m4a /tmp/transcript.txt auto
+```
+
+Transcrit un fichier stéréo existant (gauche = moi, droite = interlocuteur) avec le même code que l'app.
